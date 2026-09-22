@@ -1,0 +1,144 @@
+import { useEffect, useMemo, useState } from 'react';
+import { workbookMeta } from './data/excelData';
+import { inventoryRepository } from './services/inventoryRepository';
+import { addMaterial, addProductWithBom, adjustMaterialStock, registerProduction, registerTransaction, replaceProductBom, requestPurchase, updatePurchaseStatus } from './services/inventoryService';
+import { buildStockNotifications } from './services/notificationService';
+import type { InventoryState, Material, PurchaseStatus, TransactionType } from './types/inventory';
+import { calculateMaterialProductionCapacity, calculateMaxProduction, calculateRecommendedPurchase, calculateRemainingStock, calculateRequiredMaterials, calculateShortage, calculateTodayUsage, getInventoryStatus, isShortage } from './utils/inventoryCalculations';
+
+type Page = '대시보드'|'자재 관리'|'제품 및 BOM'|'생산 등록'|'입고·출고'|'부족 재고 알림'|'구매 신청';
+const pages: Array<[Page,string]> = [['대시보드','▦'],['자재 관리','▤'],['제품 및 BOM','◫'],['생산 등록','⚙'],['입고·출고','⇄'],['부족 재고 알림','⚠'],['구매 신청','✓']];
+const nowLocal = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0,16); };
+const today = () => nowLocal().slice(0,10);
+const fmt = (n: number) => new Intl.NumberFormat('ko-KR',{ maximumFractionDigits: 3 }).format(n);
+const dateFmt = (s: string) => s ? new Date(s).toLocaleString('ko-KR',{ month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit' }) : '-';
+
+function Badge({ status }: { status: string }) { return <span className={`badge ${status.replaceAll(' ','-')}`}>{status}</span>; }
+function Empty({ text }: { text: string }) { return <div className="empty">{text}</div>; }
+function MaterialLabel({ m }: { m: Material }) { return <><strong>{m.name}</strong><small>{m.material} · {m.specification || '규격 미기재'} · {m.code}</small></>; }
+
+export default function App() {
+  const [state,setState] = useState<InventoryState>(() => inventoryRepository.load());
+  const [page,setPage] = useState<Page>('대시보드');
+  const [menu,setMenu] = useState(false);
+  const [toast,setToast] = useState('');
+  const [purchaseMaterial,setPurchaseMaterial] = useState<Material|null>(null);
+  const [editMaterial,setEditMaterial] = useState<Material|null>(null);
+  const [addMaterialOpen,setAddMaterialOpen] = useState(false);
+  const [addProductOpen,setAddProductOpen] = useState(false);
+  useEffect(() => inventoryRepository.save(state),[state]);
+  const notify = (text:string) => { setToast(text); window.setTimeout(() => setToast(''),2600); };
+  const safeUpdate = (fn: () => InventoryState, message: string) => { try { setState(fn()); notify(message); return true; } catch(e) { notify(e instanceof Error ? e.message : '처리 중 오류가 발생했습니다.'); return false; } };
+  const notifications = useMemo(() => buildStockNotifications(state.materials,state.bom),[state.materials,state.bom]);
+  const go = (p: Page) => { setPage(p); setMenu(false); };
+  return <div className="app-shell">
+    <aside className={menu ? 'sidebar open' : 'sidebar'}>
+      <div className="brand"><div className="brand-mark">D</div><div><b>DAMPER</b><span>재고관리 시스템</span></div></div>
+      <nav>{pages.map(([p,icon]) => <button key={p} className={page===p?'active':''} onClick={()=>go(p)}><i>{icon}</i>{p}{p==='부족 재고 알림'&&notifications.length>0&&<em>{notifications.length}</em>}</button>)}</nav>
+      <div className="source"><span>기준정보</span><b>엑셀 + 사용자 등록</b><small>{state.materials.length}개 자재 · {state.products.length}개 제품</small></div>
+    </aside>
+    {menu && <button aria-label="메뉴 닫기" className="scrim" onClick={()=>setMenu(false)}/>} 
+    <main>
+      <header><button className="menu-button" onClick={()=>setMenu(true)}>☰</button><div><h1>{page}</h1><p>{page==='대시보드'?'현장 재고 현황을 한눈에 확인하세요.':`${workbookMeta.activeSheet} 엑셀 데이터 기준`}</p></div><button className="alert-button" onClick={()=>go('부족 재고 알림')}>♢<span>{notifications.length}</span></button></header>
+      <div className="content">
+        {page==='대시보드'&&<Dashboard state={state} onGo={go} onPurchase={setPurchaseMaterial}/>} 
+        {page==='자재 관리'&&<MaterialsPage state={state} onEdit={setEditMaterial} onAdd={()=>setAddMaterialOpen(true)}/>} 
+        {page==='제품 및 BOM'&&<BomPage state={state} onAdd={()=>setAddProductOpen(true)} onSaveBom={(p,lines)=>safeUpdate(()=>replaceProductBom(state,p,lines),'BOM이 수정되었습니다.')}/>} 
+        {page==='생산 등록'&&<ProductionPage state={state} onSubmit={(p,q,d)=>safeUpdate(()=>registerProduction(state,p,q,d),'생산 등록과 재고 차감이 완료되었습니다.')}/>} 
+        {page==='입고·출고'&&<TransactionsPage state={state} onSubmit={(m,t,q,d,n)=>safeUpdate(()=>registerTransaction(state,m,t,q,d,n),'입출고 내역이 등록되었습니다.')}/>} 
+        {page==='부족 재고 알림'&&<AlertsPage state={state} onPurchase={setPurchaseMaterial}/>} 
+        {page==='구매 신청'&&<PurchasesPage state={state} onStatus={(id,s)=>safeUpdate(()=>updatePurchaseStatus(state,id,s),'처리 상태가 변경되었습니다.')} onNew={setPurchaseMaterial}/>} 
+      </div>
+    </main>
+    {purchaseMaterial&&<PurchaseModal state={state} material={purchaseMaterial} onClose={()=>setPurchaseMaterial(null)} onSubmit={(q,r,reason,d)=>{if(safeUpdate(()=>requestPurchase(state,purchaseMaterial.id,q,r,reason,d),'구매 신청이 등록되었습니다.'))setPurchaseMaterial(null);}}/>}
+    {editMaterial&&<StockEditModal material={editMaterial} onClose={()=>setEditMaterial(null)} onSubmit={(q,d,r)=>{if(safeUpdate(()=>adjustMaterialStock(state,editMaterial.id,q,d,r),'현재 재고가 수정되고 조정 이력이 기록되었습니다.'))setEditMaterial(null);}}/>}
+    {addMaterialOpen&&<MaterialCreateModal onClose={()=>setAddMaterialOpen(false)} onSubmit={(input)=>{if(safeUpdate(()=>addMaterial(state,input),'새 자재가 등록되었습니다.'))setAddMaterialOpen(false);}}/>}
+    {addProductOpen&&<ProductCreateModal state={state} onClose={()=>setAddProductOpen(false)} onSubmit={(input,lines)=>{if(safeUpdate(()=>addProductWithBom(state,input,lines),'새 제품과 BOM이 등록되었습니다.'))setAddProductOpen(false);}}/>}
+    {toast&&<div className="toast">{toast}</div>}
+  </div>;
+}
+
+function Dashboard({state,onGo,onPurchase}:{state:InventoryState;onGo:(p:Page)=>void;onPurchase:(m:Material)=>void}) {
+  const low=state.materials.filter(m=>state.bom.some(x=>x.materialId===m.id)&&isShortage(m,state.bom)), usage=state.materials.reduce((s,m)=>s+calculateTodayUsage(m,state.transactions,today()),0), stock=state.materials.reduce((s,m)=>s+m.stock,0);
+  const cards=[['전체 자재 종류',`${state.materials.length}종`,'엑셀 등록 행 기준','blue'],['현재 총재고',`${fmt(stock)}개`,'전체 자재 단순 합계','navy'],['오늘 생산 투입',`${fmt(usage)}개`,'엑셀 G열 + 웹 생산','green'],['생산 여력 부족',`${low.length}종`,'실제 생산 가능 10대 이하','red']];
+  return <><section className="metric-grid">{cards.map(c=><article className={`metric ${c[3]}`} key={c[0]}><span>{c[0]}</span><strong>{c[1]}</strong><small>{c[2]}</small></article>)}</section>
+    <section className="two-col"><Panel title="재고 부족 알림" action={<button onClick={()=>onGo('부족 재고 알림')}>전체 보기</button>}>
+      {low.length?<div className="alert-list">{low.slice(0,5).map(m=><div key={m.id}><div className="danger-icon">!</div><MaterialLabel m={m}/><span><b>최대 {calculateMaterialProductionCapacity(m,state.bom)}대</b><button onClick={()=>onPurchase(m)}>구매 신청</button></span></div>)}</div>:<Empty text="생산 가능 수량이 10대 이하인 자재가 없습니다."/>}
+    </Panel><Panel title="구매 신청 필요" action={<button onClick={()=>onGo('구매 신청')}>신청 관리</button>}>
+      {low.length?<div className="compact-list">{low.slice(0,6).map(m=><div key={m.id}><MaterialLabel m={m}/><b className="danger">+{fmt(calculateShortage(m,state.bom))}{m.unit} 필요</b></div>)}</div>:<Empty text="구매 신청 대상이 없습니다."/>}
+    </Panel></section>
+    <section className="two-col"><Panel title="최근 생산 등록"><RecentProduction state={state}/></Panel><Panel title="최근 입고·출고"><RecentTransactions state={state}/></Panel></section></>;
+}
+
+function Panel({title,action,children}:{title:string;action?:React.ReactNode;children:React.ReactNode}) { return <section className="panel"><div className="panel-head"><h2>{title}</h2>{action}</div>{children}</section>; }
+function RecentProduction({state}:{state:InventoryState}) { return state.productions.length?<div className="history">{state.productions.slice(0,5).map(x=><div key={x.id}><span className="circle">P</span><div><b>{x.productName}</b><small>{dateFmt(x.date)}</small></div><strong>{fmt(x.quantity)}대</strong></div>)}</div>:<Empty text="웹에서 등록한 생산 내역이 없습니다."/>; }
+function RecentTransactions({state}:{state:InventoryState}) { return state.transactions.length?<div className="history">{state.transactions.slice(0,5).map(x=>{const adjustment=x.type==='재고 조정';return <div key={x.id}><span className={`circle ${adjustment?'adjust':x.type==='입고'?'in':'out'}`}>{adjustment?'↺':x.type==='입고'?'+':'−'}</span><div><b>{x.materialName}</b><small>{x.type} · {dateFmt(x.date)}{x.note&&` · ${x.note}`}</small></div><strong>{adjustment?'조정':`${x.type==='입고'?'+':'−'}${fmt(x.quantity)}`}</strong></div>})}</div>:<Empty text="웹에서 등록한 입출고 내역이 없습니다."/>; }
+
+function MaterialsPage({state,onEdit,onAdd}:{state:InventoryState;onEdit:(m:Material)=>void;onAdd:()=>void}) {
+  const [query,setQuery]=useState(''),[status,setStatus]=useState('전체');
+  const list=state.materials.filter(m=>`${m.code} ${m.name} ${m.specification} ${m.material}`.toLowerCase().includes(query.toLowerCase())&&(status==='전체'||getInventoryStatus(m,state.bom)===status));
+  return <Panel title={`자재 목록 (${list.length}/${state.materials.length})`} action={<button className="add-action" onClick={onAdd}>＋ 신규 자재 등록</button>}><div className="list-toolbar"><div className="filters"><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="자재명, 코드, 규격, 재질 검색"/><select value={status} onChange={e=>setStatus(e.target.value)}><option>전체</option><option>정상</option><option>부족</option></select></div><span className="threshold-note">알림 기준 · 생산 가능 10대 이하</span></div><div className="table-wrap"><table><thead><tr><th>자재 코드</th><th>자재명 / 재질</th><th>규격</th><th>적용제품</th><th>현재 재고</th><th>실제 생산 가능</th><th>오늘 사용</th><th>상태</th><th>재고 수정</th><th>구매 신청</th></tr></thead><tbody>{list.map(m=>{const linkedItems=state.bom.filter(x=>x.materialId===m.id),linked=linkedItems.length>0;const linkedNames=[...new Set(linkedItems.map(x=>state.products.find(p=>p.id===x.productId)?.name).filter(Boolean))].join(', ');return <tr key={m.id} className={linked&&isShortage(m,state.bom)?'low-row':''}><td><b>{m.code}</b><small>{m.sourceCell}</small></td><td><MaterialLabel m={m}/></td><td>{m.specification||<span className="muted">미기재</span>}</td><td>{linked?(m.sourceCell==='사용자 등록'?linkedNames:m.applicableProduct):<span className="muted">BOM 미연결</span>}</td><td className="num stock-value">{fmt(m.stock)}<small>{m.unit}</small></td><td className="num"><b>{linked?`${calculateMaterialProductionCapacity(m,state.bom)}대`:'-'}</b></td><td className="num">{fmt(calculateTodayUsage(m,state.transactions,today()))}</td><td>{linked?<Badge status={getInventoryStatus(m,state.bom)}/>:<Badge status="BOM 미연결"/>}</td><td><button className="edit-button" onClick={()=>onEdit(m)}>수량 수정</button></td><td>{state.purchases.some(p=>p.materialId===m.id&&['신청 중','승인','발주 완료'].includes(p.status))?<Badge status="신청 중"/>:'-'}</td></tr>})}</tbody></table></div></Panel>;
+}
+
+function BomPage({state,onAdd,onSaveBom}:{state:InventoryState;onAdd:()=>void;onSaveBom:(productId:string,lines:Array<{materialId:string;quantity:number}>)=>boolean}) {
+  const [productId,setProductId]=useState(state.products[0]?.id??''),[quantity,setQuantity]=useState(1),[editing,setEditing]=useState(false);
+  const product=state.products.find(p=>p.id===productId)??state.products[0];
+  useEffect(()=>{if(product&&!state.products.some(p=>p.id===productId))setProductId(product.id)},[state.products,product,productId]);
+  if(!product)return <Panel title="제품 및 BOM"><Empty text="등록된 제품이 없습니다."/><button className="primary centered" onClick={onAdd}>첫 제품 등록</button></Panel>;
+  const lines=calculateRequiredMaterials(product.id,quantity,state.bom).map(x=>({...x,m:state.materials.find(m=>m.id===x.materialId)!})).filter(x=>x.m);
+  return <div className="bom-layout"><Panel title="제품 선택" action={<button className="add-action" onClick={onAdd}>＋ 제품 등록</button>}><div className="product-list">{state.products.map(p=><button className={p.id===product.id?'selected':''} onClick={()=>{setProductId(p.id);setEditing(false)}} key={p.id}><span>{p.family}</span><b>{p.name}</b><small>{p.code} · {p.sourceCell}</small></button>)}</div></Panel><Panel title={`${product.name} BOM`} action={<button className="edit-button" onClick={()=>setEditing(true)}>BOM 편집</button>}>
+    {!lines.length?<div className="empty-cta"><Empty text="등록된 BOM이 없습니다."/><button className="primary" onClick={()=>setEditing(true)}>BOM 구성하기</button></div>:<><div className="form-row"><label>계산 생산 수량<input type="number" min="1" value={quantity} onChange={e=>setQuantity(Math.max(1,Number(e.target.value)||1))}/></label><div className="capacity">현재 최대 생산 가능 <b>{calculateMaxProduction(product.id,state.materials,state.bom)}대</b></div></div><div className="table-wrap"><table><thead><tr><th>자재</th><th>1대 소요량</th><th>총 필요량</th><th>현재 재고</th><th>예상 잔량</th><th>가능 여부</th></tr></thead><tbody>{lines.map(x=>{const remain=calculateRemainingStock(x.m.stock,x.required);return <tr key={x.materialId}><td><MaterialLabel m={x.m}/></td><td>{fmt(x.quantity)}</td><td><b>{fmt(x.required)}</b></td><td>{fmt(x.m.stock)}</td><td className={remain<0?'danger':''}>{fmt(remain)}</td><td><Badge status={remain>=0?'생산 가능':'생산 불가'}/></td></tr>})}</tbody></table></div></>}
+    {editing&&<BomEditorModal state={state} productId={product.id} onClose={()=>setEditing(false)} onSubmit={(newLines)=>{if(onSaveBom(product.id,newLines))setEditing(false)}}/>}
+  </Panel></div>;
+}
+
+function ProductionPage({state,onSubmit}:{state:InventoryState;onSubmit:(p:string,q:number,d:string)=>void}) {
+  const [productId,setProductId]=useState(state.products[0]?.id??''),[quantity,setQuantity]=useState(1),[date,setDate]=useState(nowLocal());
+  const lines=calculateRequiredMaterials(productId,quantity,state.bom).map(x=>({...x,m:state.materials.find(m=>m.id===x.materialId)!})).filter(x=>x.m); const shortages=lines.filter(x=>x.m.stock<x.required); const max=calculateMaxProduction(productId,state.materials,state.bom); const noBom=!lines.length;
+  return <><div className="production-top"><Panel title="생산 정보 입력"><div className="form-grid"><label>제품<select value={productId} onChange={e=>setProductId(e.target.value)}>{state.products.map(p=><option value={p.id} key={p.id}>{p.name} ({p.code})</option>)}</select></label><label>생산 수량<input type="number" min="1" value={quantity} onChange={e=>setQuantity(Math.max(1,Number(e.target.value)||1))}/></label><label>작업 일시<input type="datetime-local" value={date} onChange={e=>setDate(e.target.value)}/></label></div><div className="capacity-box"><span>실제 최대 생산 가능 수량</span><b>{max}대</b></div></Panel><Panel title="등록 전 확인"><div className={`ready ${shortages.length||noBom?'blocked':''}`}><strong>{noBom?'BOM 미등록':shortages.length?'생산 불가':'생산 가능'}</strong><p>{noBom?'제품 및 BOM 관리에서 자재를 먼저 구성해 주세요.':shortages.length?`${shortages.length}개 자재가 부족합니다.`:'모든 필요 자재의 재고가 충분합니다.'}</p></div>{shortages.map(x=><div className="short-line" key={x.materialId}><span>{x.m.name} · {x.m.specification}</span><b>{fmt(x.required-x.m.stock)}{x.m.unit} 부족</b></div>)}<button className="primary wide" disabled={shortages.length>0||noBom} onClick={()=>onSubmit(productId,quantity,date)}>최종 확인 후 생산 등록</button></Panel></div><Panel title="자재 소요 미리보기">{noBom?<Empty text="선택 제품의 BOM이 없습니다."/>:<div className="table-wrap"><table><thead><tr><th>자재</th><th>1대 소요</th><th>필요 수량</th><th>현재 재고</th><th>생산 후 잔량</th></tr></thead><tbody>{lines.map(x=><tr key={x.materialId}><td><MaterialLabel m={x.m}/></td><td>{fmt(x.quantity)}{x.m.unit}</td><td>{fmt(x.required)}{x.m.unit}</td><td>{fmt(x.m.stock)}{x.m.unit}</td><td className={x.m.stock-x.required<0?'danger':''}>{fmt(x.m.stock-x.required)}{x.m.unit}</td></tr>)}</tbody></table></div>}</Panel></>;
+}
+
+function TransactionsPage({state,onSubmit}:{state:InventoryState;onSubmit:(m:string,t:TransactionType,q:number,d:string,n:string)=>void}) {
+  const [materialId,setMaterialId]=useState(state.materials[0].id),[type,setType]=useState<TransactionType>('입고'),[quantity,setQuantity]=useState(1),[date,setDate]=useState(nowLocal()),[note,setNote]=useState(''); const m=state.materials.find(x=>x.id===materialId)!;
+  return <section className="two-col"><Panel title="입고·출고 등록"><div className="form-grid single"><label>자재<select value={materialId} onChange={e=>setMaterialId(e.target.value)}>{state.materials.map(m=><option value={m.id} key={m.id}>{m.code} · {m.name} · {m.specification}</option>)}</select></label><div className="current-stock">현재 재고 <b>{fmt(m.stock)}{m.unit}</b></div><label>작업 유형<select value={type} onChange={e=>setType(e.target.value as TransactionType)}><option>입고</option><option>일반 출고</option><option>분실/파손</option></select></label><label>수량<input type="number" min="1" value={quantity} onChange={e=>setQuantity(Number(e.target.value))}/></label><label>작업 일시<input type="datetime-local" value={date} onChange={e=>setDate(e.target.value)}/></label><label>비고<textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="작업 내용을 입력하세요."/></label><button className="primary" onClick={()=>onSubmit(materialId,type,quantity,date,note)}>내역 등록</button></div></Panel><Panel title="최근 입고·출고 내역"><RecentTransactions state={state}/></Panel></section>;
+}
+
+function AlertsPage({state,onPurchase}:{state:InventoryState;onPurchase:(m:Material)=>void}) {
+  const linked=state.materials.filter(m=>state.bom.some(x=>x.materialId===m.id)); const low=linked.filter(m=>isShortage(m,state.bom)).sort((a,b)=>calculateMaterialProductionCapacity(a,state.bom)-calculateMaterialProductionCapacity(b,state.bom)); return <Panel title={`생산 여력 부족 알림 (${low.length})`}><div className="notice info-notice"><b>알림 기준</b> 실제 BOM 소요량으로 계산한 생산 가능 수량이 10대 이하인 자재입니다. 공용 자재는 제품별 소요량 중 가장 큰 값을 기준으로 안전하게 계산합니다.</div>{low.length?<div className="alert-cards">{low.map(m=>{const pending=state.purchases.some(p=>p.materialId===m.id&&['신청 중','승인','발주 완료'].includes(p.status));const capacity=calculateMaterialProductionCapacity(m,state.bom);return <article key={m.id}><div className="danger-icon">!</div><div><MaterialLabel m={m}/><dl><div><dt>현재 재고</dt><dd>{fmt(m.stock)}{m.unit}</dd></div><div><dt>생산 가능</dt><dd className="danger">{capacity}대</dd></div><div><dt>11대 확보 필요량</dt><dd>{fmt(calculateShortage(m,state.bom))}{m.unit}</dd></div><div><dt>권장 신청</dt><dd>{fmt(calculateRecommendedPurchase(m,state.purchases,state.bom))}{m.unit}</dd></div></dl></div><button disabled={pending} onClick={()=>onPurchase(m)}>{pending?'신청 중':'구매 신청'}</button></article>})}</div>:<Empty text="모든 BOM 연결 자재로 11대 이상 생산할 수 있습니다."/>}</Panel>;
+}
+
+function PurchasesPage({state,onStatus,onNew}:{state:InventoryState;onStatus:(id:string,s:PurchaseStatus)=>void;onNew:(m:Material)=>void}) {
+  const candidates=state.materials.filter(m=>state.bom.some(x=>x.materialId===m.id)&&isShortage(m,state.bom)); return <><Panel title="구매 신청 관리" action={candidates.length?<button onClick={()=>onNew(candidates[0])}>+ 새 신청</button>:undefined}>{state.purchases.length?<div className="table-wrap"><table><thead><tr><th>신청 자재</th><th>신청 당시 재고</th><th>신청 수량</th><th>신청일</th><th>신청자 / 사유</th><th>처리 상태</th></tr></thead><tbody>{state.purchases.map(p=><tr key={p.id}><td><b>{p.materialName}</b><small>{p.materialId}</small></td><td>{fmt(p.currentStock)}</td><td><b>{fmt(p.quantity)}</b></td><td>{dateFmt(p.requestDate)}</td><td>{p.requester}<small>{p.reason}</small></td><td><select value={p.status} onChange={e=>onStatus(p.id,e.target.value as PurchaseStatus)}><option>신청 중</option><option>승인</option><option>발주 완료</option><option>입고 완료</option><option>취소</option></select></td></tr>)}</tbody></table></div>:<Empty text="등록된 구매 신청이 없습니다. 부족 재고 알림에서 신청할 수 있습니다."/>}</Panel></>;
+}
+
+function PurchaseModal({state,material,onClose,onSubmit}:{state:InventoryState;material:Material;onClose:()=>void;onSubmit:(q:number,r:string,reason:string,d:string)=>void}) {
+  const recommended=calculateRecommendedPurchase(material,state.purchases,state.bom),[quantity,setQuantity]=useState(Math.max(1,recommended)),[requester,setRequester]=useState(''),[reason,setReason]=useState('생산 가능 수량 10대 이하'),[date,setDate]=useState(nowLocal());
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal" onMouseDown={e=>e.stopPropagation()}><div className="panel-head"><h2>구매 신청</h2><button onClick={onClose}>✕</button></div><MaterialLabel m={material}/><div className="purchase-summary"><div><span>현재 재고</span><b>{fmt(material.stock)}{material.unit}</b></div><div><span>생산 가능</span><b className="danger">{calculateMaterialProductionCapacity(material,state.bom)}대</b></div><div><span>권장 신청</span><b>{fmt(recommended)}{material.unit}</b></div></div><div className="form-grid single"><label>신청 수량<input type="number" min="1" value={quantity} onChange={e=>setQuantity(Number(e.target.value))}/></label><label>신청일<input type="datetime-local" value={date} onChange={e=>setDate(e.target.value)}/></label><label>신청자<input value={requester} onChange={e=>setRequester(e.target.value)} placeholder="이름 입력"/></label><label>신청 사유<textarea value={reason} onChange={e=>setReason(e.target.value)}/></label></div><div className="modal-actions"><button onClick={onClose}>취소</button><button className="primary" onClick={()=>onSubmit(quantity,requester,reason,date)}>구매 신청 등록</button></div></div></div>;
+}
+
+function MaterialCreateModal({onClose,onSubmit}:{onClose:()=>void;onSubmit:(input:{code:string;name:string;material:string;specification:string;category:string;unit:string;stock:number})=>void}) {
+  const [form,setForm]=useState({code:'',name:'',material:'',specification:'',category:'',unit:'개',stock:0});
+  const field=(key:keyof typeof form,value:string|number)=>setForm(prev=>({...prev,[key]:value}));
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal" onMouseDown={e=>e.stopPropagation()}><div className="panel-head"><div><span className="eyebrow">기준정보 관리</span><h2>신규 자재 등록</h2></div><button onClick={onClose}>✕</button></div><div className="notice info-notice">등록 후 제품의 BOM 편집에서 이 자재를 연결할 수 있습니다. 자재 코드는 중복 사용할 수 없습니다.</div><div className="form-grid two"><label>자재 코드 *<input autoFocus value={form.code} onChange={e=>field('code',e.target.value)} placeholder="예: MAT-001"/></label><label>자재명 *<input value={form.name} onChange={e=>field('name',e.target.value)} placeholder="자재명 입력"/></label><label>재질<input value={form.material} onChange={e=>field('material',e.target.value)} placeholder="예: SUS304"/></label><label>규격<input value={form.specification} onChange={e=>field('specification',e.target.value)} placeholder="예: M12×45L"/></label><label>분류<input value={form.category} onChange={e=>field('category',e.target.value)} placeholder="미입력 시 기타"/></label><label>단위 *<input value={form.unit} onChange={e=>field('unit',e.target.value)} placeholder="개, kg, m 등"/></label><label>초기 재고<input type="number" min="0" value={form.stock} onChange={e=>field('stock',Number(e.target.value))}/></label></div><div className="modal-actions"><button onClick={onClose}>취소</button><button className="primary" onClick={()=>onSubmit(form)}>자재 등록</button></div></div></div>;
+}
+
+type EditableBomLine={materialId:string;quantity:number};
+function BomLinesEditor({materials,lines,setLines}:{materials:Material[];lines:EditableBomLine[];setLines:(lines:EditableBomLine[])=>void}) {
+  const addLine=()=>setLines([...lines,{materialId:'',quantity:1}]);
+  return <div className="bom-editor"><div className="bom-editor-head"><b>사용 자재 및 1대 소요량</b><button type="button" onClick={addLine}>＋ 자재 추가</button></div>{lines.map((line,index)=><div className="bom-input-row" key={index}><select value={line.materialId} onChange={e=>setLines(lines.map((x,i)=>i===index?{...x,materialId:e.target.value}:x))}><option value="">자재를 선택하세요</option>{materials.map(m=><option key={m.id} value={m.id} disabled={lines.some((x,i)=>i!==index&&x.materialId===m.id)}>{m.code} · {m.name} · {m.specification||m.material}</option>)}</select><input aria-label="1대 소요량" type="number" min="0.001" step="any" value={line.quantity} onChange={e=>setLines(lines.map((x,i)=>i===index?{...x,quantity:Number(e.target.value)}:x))}/><span>/{materials.find(m=>m.id===line.materialId)?.unit||'단위'}</span><button className="remove-line" type="button" onClick={()=>setLines(lines.filter((_,i)=>i!==index))}>삭제</button></div>)}{!lines.length&&<div className="mini-empty">자재 추가 버튼을 눌러 BOM을 구성하세요.</div>}</div>;
+}
+
+function ProductCreateModal({state,onClose,onSubmit}:{state:InventoryState;onClose:()=>void;onSubmit:(input:{code:string;name:string;family:string},lines:EditableBomLine[])=>void}) {
+  const [form,setForm]=useState({code:'',name:'',family:''}),[lines,setLines]=useState<EditableBomLine[]>([{materialId:'',quantity:1}]);
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal large-modal" onMouseDown={e=>e.stopPropagation()}><div className="panel-head"><div><span className="eyebrow">제품 + BOM 동시 등록</span><h2>신규 제품 등록</h2></div><button onClick={onClose}>✕</button></div><div className="form-grid three"><label>제품 코드 *<input autoFocus value={form.code} onChange={e=>setForm({...form,code:e.target.value})} placeholder="예: SCR-900A"/></label><label>제품명 *<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="제품명 입력"/></label><label>제품군 *<input value={form.family} onChange={e=>setForm({...form,family:e.target.value})} placeholder="예: SCR-LP"/></label></div><BomLinesEditor materials={state.materials} lines={lines} setLines={setLines}/><div className="modal-actions"><button onClick={onClose}>취소</button><button className="primary" onClick={()=>onSubmit(form,lines)}>제품과 BOM 등록</button></div></div></div>;
+}
+
+function BomEditorModal({state,productId,onClose,onSubmit}:{state:InventoryState;productId:string;onClose:()=>void;onSubmit:(lines:EditableBomLine[])=>void}) {
+  const product=state.products.find(p=>p.id===productId)!; const [lines,setLines]=useState<EditableBomLine[]>(()=>state.bom.filter(x=>x.productId===productId).map(x=>({materialId:x.materialId,quantity:x.quantity})));
+  return <div className="modal-backdrop nested" onMouseDown={onClose}><div className="modal large-modal" onMouseDown={e=>e.stopPropagation()}><div className="panel-head"><div><span className="eyebrow">{product.code}</span><h2>{product.name} BOM 편집</h2></div><button onClick={onClose}>✕</button></div><div className="notice">저장하면 이 제품의 기존 BOM이 새 구성으로 교체됩니다. 과거 생산 내역의 차감 수량은 변경되지 않습니다.</div><BomLinesEditor materials={state.materials} lines={lines} setLines={setLines}/><div className="modal-actions"><button onClick={onClose}>취소</button><button className="primary" onClick={()=>onSubmit(lines)}>BOM 저장</button></div></div></div>;
+}
+
+function StockEditModal({material,onClose,onSubmit}:{material:Material;onClose:()=>void;onSubmit:(q:number,d:string,r:string)=>void}) {
+  const [quantity,setQuantity]=useState(material.stock),[date,setDate]=useState(nowLocal()),[reason,setReason]=useState('실사 재고 반영'); const difference=quantity-material.stock;
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal stock-modal" onMouseDown={e=>e.stopPropagation()}><div className="panel-head"><div><span className="eyebrow">재고 실사 보정</span><h2>현재 수량 수정</h2></div><button onClick={onClose}>✕</button></div><div className="selected-material"><span>{material.code}</span><MaterialLabel m={material}/></div><div className="stock-comparison"><div><span>기존 재고</span><b>{fmt(material.stock)}{material.unit}</b></div><i>→</i><div className={difference<0?'decrease':difference>0?'increase':''}><span>수정 재고</span><b>{fmt(quantity||0)}{material.unit}</b></div></div><div className="difference-line"><span>조정 차이</span><b className={difference<0?'danger':difference>0?'positive':''}>{difference>0?'+':''}{fmt(Number.isFinite(difference)?difference:0)}{material.unit}</b></div><div className="form-grid single"><label>수정할 현재 재고<input autoFocus type="number" min="0" step="1" value={quantity} onChange={e=>setQuantity(Number(e.target.value))}/></label><label>조정 일시<input type="datetime-local" value={date} onChange={e=>setDate(e.target.value)}/></label><label>수정 사유<textarea value={reason} onChange={e=>setReason(e.target.value)} placeholder="실사 차이 등 수정 사유를 남겨주세요."/></label></div><div className="modal-actions"><button onClick={onClose}>취소</button><button className="primary" disabled={!Number.isFinite(quantity)||quantity<0||difference===0} onClick={()=>onSubmit(quantity,date,reason)}>수량 수정 및 이력 저장</button></div></div></div>;
+}
