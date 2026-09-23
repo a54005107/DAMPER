@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+.npm-cache/
+
+# Frontend build artifacts
+client/dist/
+client/build/
+client/.vite/
+.vite/
+*.tsbuildinfo
+
+# Spring Boot / Gradle build artifacts
+server/**/.gradle/
+server/**/build/
+server/**/out/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Logs and local runtime output
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE user-local files
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/usage.statistics.xml
+.idea/shelf/
+*.iws
