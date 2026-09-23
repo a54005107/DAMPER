@@ -1,0 +1,17 @@
+{
+  "status": "passed",
+  "checks": [
+    "formula validation and confirmation",
+    "assembly calculation",
+    "source switch",
+    "plan and alerts",
+    "save failure retry",
+    "conflict draft recovery",
+    "new material",
+    "approval and role changes",
+    "signup validation",
+    "pending access protection",
+    "no stored passwords"
+  ],
+  "errors": []
+}

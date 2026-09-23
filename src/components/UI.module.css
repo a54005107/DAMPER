@@ -1,0 +1,223 @@
+.button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--control-height);
+  padding: 6px 14px;
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.button:hover {
+  background: var(--hover);
+}
+.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+}
+.primary:hover {
+  background: var(--primary-hover);
+}
+.button:disabled {
+  background: var(--disabled-bg);
+  border-color: var(--border);
+  color: var(--disabled-text);
+  cursor: not-allowed;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 500;
+}
+.field small {
+  font-weight: 400;
+}
+.tabs {
+  display: flex;
+  gap: 24px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 24px;
+}
+.tabs button {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  min-height: 40px;
+  padding: 8px 4px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.tabs button[aria-selected='true'] {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.pageHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.pageHeader p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+}
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+  color: var(--text-muted);
+  gap: 8px;
+}
+.error {
+  color: var(--danger);
+  background: var(--danger-bg);
+  padding: 12px;
+  border-radius: 6px;
+  margin: 12px 0;
+}
+.modal {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0;
+  width: min(720px, calc(100vw - 48px));
+  max-height: calc(100dvh - 48px);
+  box-shadow: var(--shadow-modal);
+  color: var(--text);
+  background: var(--bg);
+}
+.modal[open] {
+  display: flex;
+  flex-direction: column;
+}
+.modal::backdrop {
+  background: var(--overlay);
+}
+.modal header,
+.modal footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.modal footer {
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
+  justify-content: flex-end;
+}
+.modal header button {
+  border: 0;
+  padding: 4px;
+  min-width: 36px;
+}
+.modalBody {
+  padding: 24px;
+  overflow: auto;
+  min-height: 0;
+}
+.sheet {
+  max-width: 400px;
+}
+.drawer {
+  width: 420px;
+  max-height: 100dvh;
+  height: 100dvh;
+  margin: 0 0 0 auto;
+  border-radius: 0;
+}
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--text);
+  color: white;
+  padding: 12px 20px;
+  border-radius: 6px;
+  max-width: 90vw;
+}
+.menuRow {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  padding: 20px 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: white;
+  cursor: pointer;
+}
+.menuRow:hover {
+  color: var(--primary);
+}
+@media (max-width: 767px) {
+  .pageHeader {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .tabs button {
+    min-height: 44px;
+  }
+  .modal {
+    width: calc(100vw - 32px);
+    max-height: 90dvh;
+  }
+  .modal header,
+  .modal footer {
+    padding: 16px;
+  }
+  .modalBody {
+    padding: 16px;
+  }
+  .full,
+  .drawer {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+  }
+  .sheet {
+    width: 100vw;
+    max-width: 100vw;
+    margin: auto 0 0;
+    max-height: 90dvh;
+    border-radius: 16px 16px 0 0;
+  }
+  .sheet:before {
+    content: '';
+    width: 32px;
+    height: 4px;
+    border-radius: 4px;
+    background: var(--control-border);
+    margin: 8px auto 0;
+    flex-shrink: 0;
+  }
+  .modal footer {
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+  .toast {
+    bottom: 80px;
+  }
+}

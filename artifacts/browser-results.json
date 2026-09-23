@@ -1,0 +1,17 @@
+{
+  "status": "passed",
+  "widths": [
+    320,
+    390,
+    768,
+    1440
+  ],
+  "screens": [
+    "usage",
+    "inventory",
+    "plans",
+    "permissions",
+    "more"
+  ],
+  "errors": []
+}
