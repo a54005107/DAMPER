@@ -1,7 +1,9 @@
 import { chromium, expect } from '@playwright/test';
 import { createServer } from 'vite';
 import { writeFile, mkdir } from 'node:fs/promises';
-const server = await createServer({ server: { host: '127.0.0.1', port: 5174, strictPort: true } });
+import { fileURLToPath } from 'node:url';
+process.chdir(fileURLToPath(new URL('../', import.meta.url)));
+const server = await createServer({ server: { host: '127.0.0.1', port: 0 } });
 await server.listen();
 const browser = await chromium.launch();
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
@@ -9,7 +11,7 @@ const page = await context.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('dialog', (d) => d.accept());
-const url = 'http://127.0.0.1:5174';
+const url = server.resolvedUrls.local[0].replace(/\/$/, '');
 await mkdir('artifacts', { recursive: true });
 async function login(email = 'admin@damper.demo') {
   await page.goto(url + '/login');

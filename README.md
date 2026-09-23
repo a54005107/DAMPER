@@ -7,6 +7,7 @@ React + TypeScript + Vite 기반 반응형 프론트엔드입니다. React Route
 Node.js 22 이상 권장. 검증 환경은 Node.js 24입니다.
 
 ```bash
+cd client
 npm install
 npm run dev          # 기본 http://127.0.0.1:5173
 npm run build        # TypeScript 검사 + 프로덕션 빌드
@@ -16,6 +17,23 @@ npx playwright install chromium
 npm run test:browser # Chromium 통합 검증, 자체 로컬 서버 사용
 npm run format
 ```
+
+위 npm 명령은 `DAMPER/client`에서 실행합니다. 루트에서 실행하려면 `npm --prefix client run dev`처럼 `--prefix client`를 지정하세요. 기존 개발 서버가 켜져 있다면 종료 후 새 경로에서 다시 실행하세요.
+
+## 저장소 구조
+
+```text
+DAMPER/
+├─ .git/                  기존 GitHub 저장소
+├─ .gitignore
+├─ README.md
+├─ client/                React 앱, npm 설정, 브라우저 검증
+├─ design/                디자인·와이어프레임·엑셀 분석 결과
+├─ scripts/               원본 엑셀 분석용 Python 스크립트
+└─ DAMPER재고관리(최종).xlsx
+```
+
+향후 `server/`에 Spring Boot 프로젝트를 생성하고 IntelliJ에서 해당 폴더를 열면 됩니다. 현재는 클라이언트만 분리했으며, Git 저장소는 루트 하나를 그대로 사용합니다.
 
 SPA 배포 시 `/inventory` 등의 경로를 `index.html`로 fallback하도록 웹 서버를 설정하세요.
 
@@ -62,7 +80,9 @@ SPA 배포 시 `/inventory` 등의 경로를 `index.html`로 fallback하도록 �
 - **15개 자재의 사용량(G열)과 계획(M열) 수식이 불일치합니다.** 정답을 임의 확정하지 않았습니다. 계획은 M열 기준 임시값으로 표시하고, 관련 모델의 조립 사용량 저장은 자재 편집에서 소요량을 검토·확정하기 전까지 차단합니다. 직접 사용 입력은 가능합니다.
 - 원본 누계의 과거 시트 참조에도 불일치가 있어 누계와 달성률은 가져오지 않습니다.
 
-불일치 셀·수식·모델별 차이: [EXCEL-REVIEW.md](design/EXCEL-REVIEW.md). 전체 시트 추출 결과: `design/workbook-analysis.json`. 앱 초기값: `src/data/seed.json`.
+불일치 셀·수식·모델별 차이: [EXCEL-REVIEW.md](design/EXCEL-REVIEW.md). 전체 시트 추출 결과: `design/workbook-analysis.json`. 앱 초기값: `client/src/data/seed.json`.
+
+다음 Python 명령은 `DAMPER` 루트에서 실행합니다. `client`에 있다면 먼저 `cd ..`로 이동하세요. 출력 경로는 실행 위치와 무관하게 저장소 기준으로 결정됩니다.
 
 ```bash
 python scripts/analyze.py       # 표준 라이브러리만 사용, 원본 읽기
@@ -92,7 +112,7 @@ python scripts/extract-data.py  # 초기 데이터·불일치 보고서 재생�
 
 ## 백엔드 연결 지점·한계
 
-`src/services/api.ts`의 `load`, `login`, `register`, `save`를 Spring Boot API 구현으로 교체합니다. 화면은 `src/context.tsx`를 통해 연결되며 계산은 `src/domain`에서 공유합니다. 미연결 서버 주소를 호출하지 않습니다.
+`client/src/services/api.ts`의 `load`, `login`, `register`, `save`를 Spring Boot API 구현으로 교체합니다. 화면은 `client/src/context.tsx`를 통해 연결되며 계산은 `client/src/domain`에서 공유합니다. 미연결 서버 주소를 호출하지 않습니다.
 
 서버 구현에는 로그인/세션, 가입·회사 신청, 회사별 권한 검사, 자재/BOM/계산식, 날짜별 누적 거래, 월별 계획, 승인·권한, 알림 API가 필요합니다. 버전/ETag 기반 원자적 수정과 `409/412` 충돌 응답, 날짜·자재·입력 출처 기준 멱등 수정 및 트랜잭션, 동일한 수량·수식 검증을 서버에도 적용해야 합니다. 실제 편집 상태는 WebSocket/SSE 또는 임대·heartbeat 방식이 필요합니다.
 
@@ -101,20 +121,21 @@ python scripts/extract-data.py  # 초기 데이터·불일치 보고서 재생�
 ## 검증과 구조
 
 - `npm test`: 재고·공용 합산, 누적 수정·반복 저장, 출처 전환, 수식 검증, 필터와 XLSX 내용, 역할·실패·충돌·가입
-- `scripts/browser-check.mjs`: 320/390/768/1440px 주요 화면, 가로 넘침, 저장·상세·필터·다운로드, 조회/대기 권한
-- `scripts/flow-check.mjs`: 수식 확정·조립·출처 교체, 계획·알림, 실패 재시도·충돌 복구, 자재 추가·승인·가입
-- 캡처와 결과는 `artifacts/`. 제공된 디자인과 실제 화면을 비교하여 모바일 모달 폭·라벨·목록을 수정했습니다.
+- `client/scripts/browser-check.mjs`: 320/390/768/1440px 주요 화면, 가로 넘침, 저장·상세·필터·다운로드, 조회/대기 권한
+- `client/scripts/flow-check.mjs`: 수식 확정·조립·출처 교체, 계획·알림, 실패 재시도·충돌 복구, 자재 추가·승인·가입
+- 캡처와 결과는 `client/artifacts/`. 제공된 디자인과 실제 화면을 비교하여 모바일 모달 폭·라벨·목록을 수정했습니다.
 
 브라우저 검증은 데스크톱 Chromium의 뷰포트 에뮬레이션입니다. 실제 iOS/Android 소프트 키보드·Safari, 서버 연동·다중 기기 동시성은 검증하지 않았습니다. 저장 영역을 문서 흐름 안에 두어 하단 메뉴와 겹치지 않게 구성했습니다.
 
 ```text
-src/components/   공통 UI, 레이아웃, 자재 상세·편집·내보내기
-src/pages/        사용 입력, 재고, 계획, 권한, 인증, 더보기
-src/domain/       타입, 계산, 안전한 수식 파서, 테스트
-src/services/     mock API, XLSX 생성
-src/data/         원본에서 추출한 초기 데이터
-src/context.tsx   세션·공통 상태, 저장·실패·충돌 처리
-src/styles.css    design.md 토큰과 반응형 스타일
-public/licenses/  번들 Pretendard OFL 라이선스
-scripts/          원본 분석·브라우저 검증
+client/src/components/   공통 UI, 레이아웃, 자재 상세·편집·내보내기
+client/src/pages/        사용 입력, 재고, 계획, 권한, 인증, 더보기
+client/src/domain/       타입, 계산, 안전한 수식 파서, 테스트
+client/src/services/     mock API, XLSX 생성
+client/src/data/         원본에서 추출한 초기 데이터
+client/src/context.tsx   세션·공통 상태, 저장·실패·충돌 처리
+client/src/styles.css    design.md 토큰과 반응형 스타일
+client/public/licenses/  번들 Pretendard OFL 라이선스
+client/scripts/          브라우저 검증
+scripts/                 원본 엑셀 분석
 ```

@@ -1,8 +1,11 @@
 import { chromium } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { createServer } from 'vite';
-const server = await createServer({ server: { host: '127.0.0.1', port: 5173, strictPort: true } });
+import { fileURLToPath } from 'node:url';
+process.chdir(fileURLToPath(new URL('../', import.meta.url)));
+const server = await createServer({ server: { host: '127.0.0.1', port: 0 } });
 await server.listen();
+const url = server.resolvedUrls.local[0].replace(/\/$/, '');
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({
   viewport: { width: 1440, height: 1000 },
@@ -12,7 +15,7 @@ const page = await context.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 await mkdir('artifacts', { recursive: true });
-await page.goto('http://127.0.0.1:5173');
+await page.goto(url);
 await page.getByRole('button', { name: '로그인', exact: true }).click();
 await page.getByRole('heading', { name: '금일 사용 입력', exact: true }).waitFor();
 await page.getByRole('spinbutton', { name: 'R311 오늘 사용', exact: true }).fill('12');
@@ -40,7 +43,7 @@ await page.screenshot({ path: 'artifacts/usage-1440.png', fullPage: true });
 for (const width of [1440, 768, 390, 320]) {
   await page.setViewportSize({ width, height: 900 });
   for (const route of ['/usage', '/inventory', '/plans', '/permissions', '/more']) {
-    await page.goto('http://127.0.0.1:5173' + route);
+    await page.goto(url + route);
     await page.locator('main h1').waitFor();
     await page.evaluate(() => document.fonts.ready);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
@@ -50,7 +53,7 @@ for (const width of [1440, 768, 390, 320]) {
   }
 }
 await page.setViewportSize({ width: 1440, height: 1000 });
-await page.goto('http://127.0.0.1:5173/inventory');
+await page.goto(url + '/inventory');
 await page.getByRole('textbox', { name: '자재명·규격 검색' }).fill('NUT');
 const downloadPromise = page.waitForEvent('download');
 await page.getByRole('button', { name: '엑셀 내보내기', exact: true }).click();
@@ -60,7 +63,7 @@ await download.saveAs('artifacts/filtered-inventory.xlsx');
 await page.getByRole('textbox', { name: '자재명·규격 검색' }).fill('xyz-nothing');
 await page.getByText('조건에 맞는 자재가 없습니다.').waitFor();
 await page.getByRole('button', { name: '필터 초기화', exact: true }).last().click();
-await page.goto('http://127.0.0.1:5173/inventory?material=R311');
+await page.goto(url + '/inventory?material=R311');
 await page.getByRole('dialog').waitFor();
 await page.getByRole('spinbutton', { name: '입고수량', exact: true }).fill('8');
 await page.getByRole('button', { name: '재고 저장', exact: true }).click();
@@ -75,7 +78,7 @@ await page.setViewportSize({ width: 390, height: 844 });
 await page.getByRole('button', { name: '필터', exact: true }).click();
 await page.screenshot({ path: 'artifacts/filter-390.png' });
 await page.getByRole('button', { name: '닫기', exact: true }).click();
-await page.goto('http://127.0.0.1:5173/inventory?material=R311');
+await page.goto(url + '/inventory?material=R311');
 await page.getByRole('dialog').waitFor();
 await page.getByRole('button', { name: '자재정보 · 계산식 편집' }).click();
 await page.getByRole('heading', { name: '자재정보 · 계산식 편집' }).waitFor();
@@ -93,15 +96,15 @@ await context.close();
 for (const role of ['viewer', 'pending']) {
   const ctx = await browser.newContext();
   const p = await ctx.newPage();
-  await p.goto('http://127.0.0.1:5173/login');
+  await p.goto(url + '/login');
   await p.getByLabel('이메일', { exact: true }).fill(role + '@damper.demo');
   await p.getByRole('button', { name: '로그인', exact: true }).click();
   await p.waitForURL(role === 'pending' ? '**/pending' : '**/usage');
   if (role === 'viewer') {
-    await p.goto('http://127.0.0.1:5173/permissions');
+    await p.goto(url + '/permissions');
     await p.getByRole('heading', { name: '접근 권한이 없습니다' }).waitFor();
   } else {
-    await p.goto('http://127.0.0.1:5173/inventory');
+    await p.goto(url + '/inventory');
     await p.waitForURL('**/pending');
   }
   await ctx.close();
