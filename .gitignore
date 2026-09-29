@@ -20,6 +20,20 @@ server/**/out/
 !.env.example
 !**/.env.example
 
+# Docker / database local secrets and data
+docker-compose.override.yml
+compose.override.yml
+.pgpass
+*.dump
+*.backup
+*.sql.gz
+*.tar.gz
+postgres-data/
+postgresql-data/
+db-data/
+.secrets/
+docker/secrets/
+
 # Logs and local runtime output
 *.log
 logs/
@@ -33,4 +47,5 @@ Thumbs.db
 .idea/tasks.xml
 .idea/usage.statistics.xml
 .idea/shelf/
+.idea/easycode.ignore
 *.iws
